@@ -10,16 +10,18 @@
     "sync:metadata": "node syncNFTMetadata.js"
   },
   "dependencies": {
-    "@supabase/supabase-js": "^2.45.0",
     "@opensea/seaport-js": "^2.0.2",
-    "ethers": "^5.7.2",
+    "@supabase/supabase-js": "^2.45.0",
+    "@walletconnect/web3-provider": "^1.8.0",
+    "buffer": "^6.0.3",
     "cors": "^2.8.5",
+    "dotenv": "^16.0.0",
+    "ethers": "^5.7.2",
     "express": "^4.18.2",
     "helmet": "^7.0.0",
     "nanoid": "^4.0.0",
-    "dotenv": "^16.0.0",
     "node-fetch": "^3.3.2",
-    "buffer": "^6.0.3"
+    "web3modal": "^1.9.12"
   },
   "devDependencies": {
     "vite": "^5.4.21"
