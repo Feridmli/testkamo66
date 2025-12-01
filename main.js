@@ -16,7 +16,7 @@ const ItemType = {
 };
 
 const OrderType = {
-    FULL_OPEN: 0,     // Zone yoxdur, hər kəs ala bilər (Ən təhlükəsiz)
+    FULL_OPEN: 0,
     PARTIAL_OPEN: 1,
     FULL_RESTRICTED: 2,
     PARTIAL_RESTRICTED: 3
@@ -37,6 +37,11 @@ const ZERO_ADDRESS = "0x0000000000000000000000000000000000000000";
 
 const APECHAIN_ID = 33139;
 const APECHAIN_ID_HEX = "0x8173";
+
+// Sizin IPFS Default şəkliniz (Gateway ilə)
+const DEFAULT_IPFS_GATEWAY = "https://ipfs.io/ipfs/"; // Və ya "https://cloudflare-ipfs.com/ipfs/"
+const DEFAULT_IMAGE_CID = "QmWxidQSTpbJgbZxkNBuztAuzgTpueXe4LSmUraZXCf4v8"; 
+const FALLBACK_IMAGE_URL = `${DEFAULT_IPFS_GATEWAY}${DEFAULT_IMAGE_CID}`;
 
 let provider = null;
 let signer = null;
@@ -67,15 +72,24 @@ function notify(msg, timeout = 3000) {
   if (timeout) setTimeout(() => { if (noticeDiv.textContent === msg) noticeDiv.textContent = ""; }, timeout);
 }
 
+// FIX: Şəkillərin düzgün açılması üçün yenilənmiş funksiya
 function resolveIPFS(url) {
-  if (!url) return "ipfs://QmWxidQSTpbJgbZxkNBuztAuzgTpueXe4LSmUraZXCf4v8/";
-  const GATEWAY = "https://cloudflare-ipfs.com/ipfs/";
+  // Əgər URL yoxdursa, sizin default şəklinizi qaytarırıq
+  if (!url) return FALLBACK_IMAGE_URL;
+
+  const GATEWAY = "https://ipfs.io/ipfs/";
   let originalUrl = url;
-  if (url.startsWith("ipfs://")) {
-    originalUrl = url.replace("ipfs://", GATEWAY);
-  } else if (url.startsWith("Qm") && url.length >= 46) {
-    originalUrl = `${GATEWAY}${url}`;
+
+  // ipfs:// protokolunu https:// gateway-ə çeviririk
+  if (originalUrl.startsWith("ipfs://")) {
+    originalUrl = originalUrl.replace("ipfs://", GATEWAY);
+  } 
+  // Əgər sadəcə CID gəlibsə (məs: Qm...) qarşısına gateway əlavə edirik
+  else if (originalUrl.startsWith("Qm") && !originalUrl.startsWith("http")) {
+    originalUrl = `${GATEWAY}${originalUrl}`;
   }
+
+  // Şəkli optimizasiya edən servisdən keçiririk (daha sürətli yüklənmə üçün)
   return `https://wsrv.nl/?url=${encodeURIComponent(originalUrl)}&w=500&q=75&output=webp&il`;
 }
 
@@ -177,16 +191,12 @@ async function connectWallet() {
     signer = provider.getSigner();
 
     // ============================================================
-    // FIX: Ethers v5 üçün signTypedData Patch (SİZİN XƏTANI DÜZƏLDƏN HİSSƏ)
+    // FIX: Ethers v5 üçün signTypedData Patch
     // ============================================================
     if (!signer.signTypedData) {
         signer.signTypedData = async (domain, types, value) => {
-            // Ethers v5 'EIP712Domain' tipini avtomatik əlavə edir,
-            // əgər Seaport onu yenidən göndərirsə, konflikt yaranır.
             const typesCopy = { ...types };
             delete typesCopy.EIP712Domain; 
-            
-            // Gizli _signTypedData funksiyasını çağırırıq
             return await signer._signTypedData(domain, typesCopy, value);
         };
     }
@@ -266,6 +276,7 @@ async function loadNFTs() {
       const tokenid = tokenidRaw.toString(); 
 
       const name = nft.name || `NFT #${tokenid}`;
+      // FIX: Yeni resolveIPFS funksiyasını çağırırıq
       const image = resolveIPFS(nft.image);
       
       let displayPrice = "";
@@ -317,10 +328,11 @@ async function loadNFTs() {
           }
       }
 
+      // FIX: onerror hissəsini də gateway linki ilə əvəz etdik və loop-un qarşısını almaq üçün this.onerror=null əlavə etdik
       card.innerHTML = `
         ${checkboxHTML}
         <div class="card-image-wrapper">
-            <img src="${image}" loading="lazy" decoding="async" onerror="this.src='ipfs://QmWxidQSTpbJgbZxkNBuztAuzgTpueXe4LSmUraZXCf4v8/'">
+            <img src="${image}" loading="lazy" decoding="async" onerror="this.onerror=null; this.src='${FALLBACK_IMAGE_URL}'">
         </div>
         <div class="card-content">
             <div class="card-title">${name}</div>
@@ -450,7 +462,6 @@ async function bulkListNFTs(tokenIds, priceInEth) {
 
         const orderInputs = cleanTokenIds.map(tokenStr => {
             return {
-                // KRITIK: OrderType 0 = FULL_OPEN (Zone yoxdur)
                 orderType: OrderType.FULL_OPEN,
                 zone: ZERO_ADDRESS,
                 zoneHash: ZERO_BYTES32,
@@ -476,7 +487,6 @@ async function bulkListNFTs(tokenIds, priceInEth) {
 
         notify("Zəhmət olmasa cüzdanda imzalayın...");
         
-        // Bu funksiya artıq bizim patch edilmiş signTypedData-nı istifadə edəcək
         const { executeAllActions } = await seaport.createBulkOrders(orderInputs, seller);
         const signedOrders = await executeAllActions(); 
 
@@ -554,11 +564,9 @@ async function buyNFT(nftRecord) {
 
         const txRequest = await actions[0].transactionMethods.buildTransaction();
 
-        // Value Hesablanması (APE - Native)
         let finalValue = ethers.BigNumber.from(0);
         if (cleanOrd.parameters.consideration) {
             cleanOrd.parameters.consideration.forEach(c => {
-                // ItemType 0 = Native (APE)
                 if (Number(c.itemType) === 0) { 
                      finalValue = finalValue.add(ethers.BigNumber.from(c.startAmount));
                 }
@@ -569,7 +577,6 @@ async function buyNFT(nftRecord) {
             finalValue = ethers.BigNumber.from(txRequest.value);
         }
 
-        // TƏHLÜKƏSİZ GAS LİMİTİ (L3 Orbit Chain Fix)
         let gasLimit;
         try {
             const est = await signer.estimateGas({ 
